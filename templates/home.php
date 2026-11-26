@@ -82,6 +82,16 @@
         th, td { text-align: left; padding: 0.65rem 0.8rem; border-bottom: 1px solid var(--line); }
         th { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
         .muted { color: var(--muted); }
+        .small { font-size: 0.85rem; }
+        .warn { color: var(--warn); }
+        .tag {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 0.05rem 0.4rem;
+            border: 1px solid var(--line);
+            margin-right: 0.25rem;
+        }
+        .table-wrap { overflow-x: auto; }
         @media (max-width: 640px) {
             form { grid-template-columns: 1fr; }
         }
@@ -93,6 +103,7 @@
     <p class="lede">
         Average PM2.5 (µg/m³) for Sofia, Plovdiv, Varna, Burgas and Ruse.
         Data is downloaded from the European Environment Agency and stored locally.
+        Where EEA data is incomplete, missing hours are filled from OpenAQ.
     </p>
 
     <form id="query-form">
@@ -152,14 +163,23 @@ form.addEventListener('submit', async (event) => {
 });
 
 function render(data) {
+    const sourceNames = { eea: 'EEA', openaq: 'OpenAQ' };
     const rows = data.ranking.map((row, index) => `
         <tr>
             <td>${index + 1}</td>
             <td>${escapeHtml(row.city)}</td>
             <td>${row.average_pm25.toFixed(2)}</td>
-            <td class="muted">${row.station_count} station${row.station_count === 1 ? '' : 's'}, ${row.sample_count} hours</td>
+            <td class="${row.coverage.complete ? '' : 'warn'}">
+                ${row.coverage.percent.toFixed(1)}%${row.coverage.complete ? '' : ' ⚠'}
+                <div class="muted small">${row.coverage.hours_covered} / ${row.coverage.hours_expected} h</div>
+            </td>
+            <td>
+                ${row.sources.map((s) => `<span class="tag">${escapeHtml(sourceNames[s] || s)}</span>`).join('')}
+                <div class="muted small">${row.station_count} station${row.station_count === 1 ? '' : 's'}${Object.entries(row.coverage.hours_by_source).filter(([s]) => s !== 'eea').map(([s, h]) => `, ${h} h from ${escapeHtml(sourceNames[s] || s)}`).join('')}</div>
+            </td>
         </tr>
     `).join('');
+    const incomplete = data.ranking.filter((row) => !row.coverage.complete).map((row) => row.city);
     const missing = (data.unavailable || []).map((row) =>
         `<li><strong>${escapeHtml(row.city)}</strong> — ${escapeHtml(row.reason)}</li>`
     ).join('');
@@ -169,12 +189,15 @@ function render(data) {
             <h2>${escapeHtml(data.cleanest.city)}</h2>
             <div class="value">${data.cleanest.average_pm25.toFixed(2)} <span class="muted">${escapeHtml(data.unit)}</span></div>
         </section>
+        ${incomplete.length ? `<div class="error">Incomplete data (below ${data.coverage_threshold_percent}% of hours) for ${incomplete.map(escapeHtml).join(', ')}. Their averages may not be representative.</div>` : ''}
+        <div class="table-wrap">
         <table>
             <thead>
-                <tr><th>#</th><th>City</th><th>Average PM2.5</th><th></th></tr>
+                <tr><th>#</th><th>City</th><th>Average PM2.5</th><th>Coverage</th><th>Source</th></tr>
             </thead>
             <tbody>${rows}</tbody>
         </table>
+        </div>
         ${missing ? `<p class="muted" style="margin-top:1rem">Not ranked</p><ul>${missing}</ul>` : ''}
     `;
 }

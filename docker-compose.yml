@@ -7,6 +7,9 @@ services:
       - "8000:8080"
     volumes:
       - air_quality_data:/var/lib/air_quality
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATA_DIR: /var/lib/air_quality
       REFRESH_HOURS: "6"

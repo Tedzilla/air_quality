@@ -14,11 +14,36 @@ final class Config
     public const HISTORY_MONTHS = 6;
     public const EEA_DATASET_UTD = 1;
 
+    /** City centre coordinates (lat, lon), used to find OpenAQ sensors near each city. */
+    public const CITY_COORDINATES = [
+        'Sofia' => [42.6977, 23.3219],
+        'Plovdiv' => [42.1354, 24.7453],
+        'Varna' => [43.2141, 27.9147],
+        'Burgas' => [42.5048, 27.4626],
+        'Ruse' => [43.8356, 25.9657],
+    ];
+
+    /** A city whose EEA data covers fewer hours than this share of the window is topped up from OpenAQ. */
+    public const COVERAGE_THRESHOLD = 0.75;
+
+    /**
+     * Sources in priority order. For each city-hour only the highest-priority source with data is used,
+     * and a source is consulted only when the sources above it cover less than COVERAGE_THRESHOLD.
+     */
+    public const SOURCES = ['eea', 'openaq'];
+
+    public const OPENAQ_PM25_PARAMETER_ID = 2;
+    public const OPENAQ_RADIUS_METERS = 20000;
+    /** OpenAQ hourly values built from less than this share of the expected readings are dropped. */
+    public const OPENAQ_MIN_HOUR_COVERAGE_PERCENT = 50.0;
+
     public function __construct(
         public readonly string $dataDir,
         public readonly string $duckdbBin,
         public readonly string $eeaApiBase,
         public readonly int $refreshHours,
+        public readonly ?string $openAqApiKey = null,
+        public readonly string $openAqApiBase = 'https://api.openaq.org/v3',
     ) {
         if (!is_dir($this->dataDir) && !mkdir($this->dataDir, 0775, true) && !is_dir($this->dataDir)) {
             throw new \RuntimeException('Cannot create data directory: ' . $this->dataDir);
@@ -32,12 +57,16 @@ final class Config
         $duckdb = getenv('DUCKDB_BIN') ?: 'duckdb';
         $api = getenv('EEA_API_BASE') ?: 'https://eeadmz1-downloads-api-appservice.azurewebsites.net';
         $hours = (int) (getenv('REFRESH_HOURS') ?: '6');
+        $openAqKey = trim((string) getenv('OPENAQ_API_KEY'));
+        $openAqBase = getenv('OPENAQ_API_BASE') ?: 'https://api.openaq.org/v3';
 
         return new self(
             dataDir: rtrim($dataDir, '/'),
             duckdbBin: $duckdb,
             eeaApiBase: rtrim($api, '/'),
             refreshHours: max(1, $hours),
+            openAqApiKey: $openAqKey !== '' ? $openAqKey : null,
+            openAqApiBase: rtrim($openAqBase, '/'),
         );
     }
 

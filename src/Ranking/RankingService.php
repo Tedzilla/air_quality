@@ -9,8 +9,11 @@ use AirQuality\Storage\Database;
 
 final class RankingService
 {
-    public function __construct(private readonly Database $database)
-    {
+    public function __construct(
+        private readonly Database $database,
+        /** @var list<string> */
+        private readonly array $enabledSources = ['eea'],
+    ) {
     }
 
     /**
@@ -49,13 +52,20 @@ final class RankingService
         $toExclusive = $toDate->modify('+1 day')->format('Y-m-d') . 'T00:00:00';
         $ranked = $this->database->ranking($from, $toExclusive);
 
+        // Hours that have already ended in the requested period; today's later hours cannot have data yet.
+        $periodEnd = min(
+            new \DateTimeImmutable($toExclusive, new \DateTimeZone('UTC')),
+            new \DateTimeImmutable(gmdate('Y-m-d\TH:00:00'), new \DateTimeZone('UTC')),
+        );
+        $expectedHours = max(1, intdiv($periodEnd->getTimestamp() - $fromDate->getTimestamp(), 3600));
+
         $rankedNames = array_map(static fn (array $row): string => $row['city'], $ranked);
         $unavailable = [];
         foreach (Config::CITIES as $city) {
             if (!in_array($city, $rankedNames, true)) {
                 $unavailable[] = [
                     'city' => $city,
-                    'reason' => 'EEA currently has no valid hourly PM2.5 measurements for this city in the selected period.',
+                    'reason' => 'Neither EEA nor OpenAQ has valid hourly PM2.5 measurements for this city in the selected period.',
                 ];
             }
         }
@@ -64,6 +74,7 @@ final class RankingService
             throw new RankingException('No valid PM2.5 measurements in the selected period for the tracked cities.');
         }
 
+        $ranked = array_map(fn (array $row): array => $this->describe($row, $expectedHours), $ranked);
         $cleanest = $ranked[0];
 
         return [
@@ -71,18 +82,9 @@ final class RankingService
             'to' => $toDate->format('Y-m-d'),
             'pollutant' => Config::POLLUTANT,
             'unit' => 'µg/m³',
-            'cleanest' => [
-                'city' => $cleanest['city'],
-                'average_pm25' => $cleanest['average_pm25'],
-                'sample_count' => $cleanest['sample_count'],
-                'station_count' => $cleanest['station_count'],
-            ],
-            'ranking' => array_map(static fn (array $row): array => [
-                'city' => $row['city'],
-                'average_pm25' => $row['average_pm25'],
-                'sample_count' => $row['sample_count'],
-                'station_count' => $row['station_count'],
-            ], $ranked),
+            'cleanest' => $cleanest,
+            'ranking' => $ranked,
+            'coverage_threshold_percent' => Config::COVERAGE_THRESHOLD * 100,
             'unavailable' => $unavailable,
             'data_window' => [
                 'from' => $window['from'],
@@ -103,11 +105,41 @@ final class RankingService
             'pollutant' => Config::POLLUTANT,
             'unit' => 'µg/m³',
             'source' => 'European Environment Agency air quality download service',
+            'source_priority' => Config::SOURCES,
+            'enabled_sources' => $this->enabledSources,
+            'fallback_rule' => 'A fallback source fills missing hours for a city when the sources ranked above it cover less than '
+                . (Config::COVERAGE_THRESHOLD * 100) . '% of the history window.',
             'history_months' => Config::HISTORY_MONTHS,
             'data_window' => $this->database->dataWindow(),
             'last_updated' => $this->database->meta('last_ingest_at'),
             'last_ingest_error' => $this->database->meta('last_ingest_error') ?: null,
             'last_ingest_summary' => $this->decodeSummary($this->database->meta('last_ingest_summary')),
+        ];
+    }
+
+    /**
+     * @param array{city: string, average_pm25: float, sample_count: int, station_count: int,
+     *     hours_covered: int, hours_by_source: array<string, int>} $row
+     * @return array<string, mixed>
+     */
+    private function describe(array $row, int $expectedHours): array
+    {
+        $sources = array_keys($row['hours_by_source']);
+        $percent = min(100.0, round($row['hours_covered'] / $expectedHours * 100, 1));
+
+        return [
+            'city' => $row['city'],
+            'average_pm25' => $row['average_pm25'],
+            'sample_count' => $row['sample_count'],
+            'station_count' => $row['station_count'],
+            'sources' => $sources,
+            'coverage' => [
+                'hours_expected' => $expectedHours,
+                'hours_covered' => $row['hours_covered'],
+                'hours_by_source' => $row['hours_by_source'],
+                'percent' => $percent,
+                'complete' => $percent >= Config::COVERAGE_THRESHOLD * 100,
+            ],
         ];
     }
 

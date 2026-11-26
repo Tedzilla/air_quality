@@ -44,10 +44,27 @@ A city is listed as not ranked when EEA currently has no valid PM2.5 for that ci
 
 Downloads repeat every 6 hours inside the container. History older than 6 months is pruned.
 
+### Completeness check and OpenAQ fallback
+
+After each EEA download, the app measures **coverage** per city: the share of hours in the 6-month window with at least one valid sample, plus the longest gap.
+If EEA covers less than 75% of the hours for a city, the app looks up PM2.5 sensors within 20 km of the city centre on [OpenAQ](https://openaq.org) and downloads their hourly means (`/v3/sensors/{id}/hours`). Only hours after the last stored one are requested, to stay within the free rate limit (60 requests/minute).
+
+- EEA stays the primary source: OpenAQ samples are used only for city-hours with no EEA sample, so a station published by both sources is never counted twice.
+- OpenAQ hours built from less than 50% of the expected readings, or with quality flags, are dropped.
+- `/api/ranking` reports `coverage` (hours covered/expected, percent, hours per source) and `sources` for each city. The UI warns when a city is below 75%.
+
+OpenAQ needs a free API key (https://explore.openaq.org → account settings). Put it in `.env` (git- and docker-ignored):
+
+```
+OPENAQ_API_KEY=your-key
+```
+
+Without a key the app runs on EEA data only. As of late 2026, OpenAQ fills Plovdiv from a senstate low-cost sensor; Burgas has no PM2.5 in either source (only PM10 and gases).
+
 ## Layout
 
 ```
-bin/ingest.php      download EEA parquet → SQLite
+bin/ingest.php      download EEA parquet (+ OpenAQ fallback) → SQLite
 bin/scheduler.php   refresh on an interval
 public/index.php    web UI + JSON API
 src/                PHP application code
