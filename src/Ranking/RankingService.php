@@ -75,7 +75,14 @@ final class RankingService
         }
 
         $ranked = array_map(fn (array $row): array => $this->describe($row, $expectedHours), $ranked);
-        $cleanest = $ranked[0];
+
+        // Cities measured mostly by reference monitors are ranked first; low-cost-only cities follow,
+        // each group sorted by average. Only a high-confidence city can be named the cleanest, unless
+        // no city has reference data in the period.
+        $high = array_values(array_filter($ranked, static fn (array $r): bool => $r['confidence'] === 'high'));
+        $low = array_values(array_filter($ranked, static fn (array $r): bool => $r['confidence'] === 'low'));
+        $ranked = array_merge($high, $low);
+        $cleanest = $high[0] ?? $low[0];
 
         return [
             'from' => $fromDate->format('Y-m-d'),
@@ -83,7 +90,14 @@ final class RankingService
             'pollutant' => Config::POLLUTANT,
             'unit' => 'µg/m³',
             'cleanest' => $cleanest,
+            'cleanest_basis' => $high !== []
+                ? 'Chosen among cities measured mainly by reference monitors (EEA or OpenAQ reference stations).'
+                : 'No city has reference-monitor data in this period; chosen from low-cost sensors, lower confidence.',
             'ranking' => $ranked,
+            'confidence_rule' => sprintf(
+                'high = at least %d%% of covered hours come from reference monitors; low = mainly low-cost sensors.',
+                Config::REFERENCE_SHARE_FOR_HIGH_CONFIDENCE * 100
+            ),
             'coverage_threshold_percent' => Config::COVERAGE_THRESHOLD * 100,
             'unavailable' => $unavailable,
             'data_window' => [
@@ -119,13 +133,14 @@ final class RankingService
 
     /**
      * @param array{city: string, average_pm25: float, sample_count: int, station_count: int,
-     *     hours_covered: int, hours_by_source: array<string, int>} $row
+     *     hours_covered: int, reference_hours: int, hours_by_source: array<string, int>} $row
      * @return array<string, mixed>
      */
     private function describe(array $row, int $expectedHours): array
     {
         $sources = array_keys($row['hours_by_source']);
         $percent = min(100.0, round($row['hours_covered'] / $expectedHours * 100, 1));
+        $referenceShare = $row['hours_covered'] > 0 ? $row['reference_hours'] / $row['hours_covered'] : 0.0;
 
         return [
             'city' => $row['city'],
@@ -133,10 +148,12 @@ final class RankingService
             'sample_count' => $row['sample_count'],
             'station_count' => $row['station_count'],
             'sources' => $sources,
+            'confidence' => $referenceShare >= Config::REFERENCE_SHARE_FOR_HIGH_CONFIDENCE ? 'high' : 'low',
             'coverage' => [
                 'hours_expected' => $expectedHours,
                 'hours_covered' => $row['hours_covered'],
                 'hours_by_source' => $row['hours_by_source'],
+                'hours_from_reference_monitors' => $row['reference_hours'],
                 'percent' => $percent,
                 'complete' => $percent >= Config::COVERAGE_THRESHOLD * 100,
             ],

@@ -92,7 +92,10 @@ final class Client implements HourlySource
         usort($sensors, static fn (array $a, array $b): int => $a['distance'] <=> $b['distance']);
         $sensors = array_slice(array_values($sensors), 0, Config::SENSOR_COMMUNITY_MAX_SENSORS);
 
-        return array_map(static fn (array $s): array => ['id' => $s['id'], 'label' => $s['label']], $sensors);
+        return array_map(
+            static fn (array $s): array => ['id' => $s['id'], 'label' => $s['label'], 'grade' => 'low_cost'],
+            $sensors
+        );
     }
 
     public function hourly(string $sensorId, \DateTimeImmutable $from, \DateTimeImmutable $to): array

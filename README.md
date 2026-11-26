@@ -55,7 +55,13 @@ After each EEA download, the app measures **coverage** per city: the share of ho
 - **sensor.community** (up to 10 closest outdoor sensors within 10 km): no key needed. Sensors are found via the live API and history is read from the daily per-sensor CSV archive (UTC, readings every ~2.5 min), averaged per hour; hours with fewer than 6 readings are dropped. Data is under the [ODbL](https://opendatacommons.org/licenses/odbl/). Disable with `SENSOR_COMMUNITY_ENABLED=false`.
 - `/api/ranking` reports `coverage` (hours covered/expected, percent, hours per source) and `sources` for each city. The UI warns when a city is below 75%.
 
-As of late 2026, Plovdiv is filled from an OpenAQ senstate sensor and Burgas from sensor.community. Both are low-cost sensors, which are less accurate than the EEA reference stations.
+### Data quality: outliers and confidence
+
+- **Outlier filter.** For fallback sources, each city-hour is compared across sensors of the same source. With at least 3 sensors, a sample more than 3× the median of the others and more than 10 µg/m³ above it is marked `excluded` (kept in the database, ignored by coverage and ranking). This removes broken sensors, such as one Burgas SDS011 that read up to 991 µg/m³.
+- **Confidence.** Each station is graded `reference` (EEA, and OpenAQ locations flagged as monitors) or `low_cost` (senstate, sensor.community, etc.). A city is `high` confidence when at least 75% of its covered hours come from reference monitors, `low` otherwise.
+- **Ranking.** `ranking` lists high-confidence cities first, then low-confidence ones, each sorted by average. `cleanest` is picked only among high-confidence cities, unless none has reference data in the period. The UI shows low-cost-only cities in a separate “lower confidence” table.
+
+As of late 2026, Plovdiv (OpenAQ, senstate) and Burgas (sensor.community, SDS011) have only low-cost sensors. Their averages read noticeably lower than the EEA stations, so they are not compared directly with Sofia, Varna and Ruse.
 
 The first download runs in the background, so the web server starts right away. The sensor.community history takes a minute or two.
 

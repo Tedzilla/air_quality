@@ -38,6 +38,17 @@ final class Config
     /** Sensors report every ~2.5 minutes (~24/hour); hours with fewer readings than this are dropped. */
     public const SENSOR_COMMUNITY_MIN_READINGS_PER_HOUR = 6;
 
+    /** Outlier filter for low-cost sources, applied per city-hour across sensors of the same source. */
+    public const OUTLIER_MIN_SENSORS = 3;
+    public const OUTLIER_RATIO = 3.0;
+    public const OUTLIER_MIN_DIFF = 10.0;
+
+    /**
+     * A city is ranked with high confidence when at least this share of its hours come from reference
+     * monitors. Only high-confidence cities can be named the cleanest.
+     */
+    public const REFERENCE_SHARE_FOR_HIGH_CONFIDENCE = 0.75;
+
     public const OPENAQ_PM25_PARAMETER_ID = 2;
     public const OPENAQ_RADIUS_METERS = 20000;
     /** OpenAQ hourly values built from less than this share of the expected readings are dropped. */

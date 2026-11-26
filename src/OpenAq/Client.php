@@ -56,6 +56,7 @@ final class Client implements HourlySource
                 $sensors[] = [
                     'id' => (string) $sensor['id'],
                     'label' => trim(($location['name'] ?? '') . ' (' . ($location['provider']['name'] ?? 'OpenAQ') . ')'),
+                    'grade' => !empty($location['isMonitor']) ? 'reference' : 'low_cost',
                 ];
             }
         }

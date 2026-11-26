@@ -197,12 +197,13 @@ final class Ingestor
                 ? $from
                 : max($from, (new \DateTimeImmutable($latest, $utc))->modify('+1 hour'));
 
-            $entry = ['sensor' => $sensor['id'], 'label' => $sensor['label'], 'samples' => 0];
+            $entry = ['sensor' => $sensor['id'], 'label' => $sensor['label'], 'grade' => $sensor['grade'], 'samples' => 0];
+            // Refresh the station row even without new data, so its grade and label stay current.
+            $this->database->replaceStation($samplingPoint, $cityId, $source->name(), $sensor['label'], $sensor['grade']);
             if ($start < $toExclusive) {
                 try {
                     $rows = $source->hourly($sensor['id'], $start, $toExclusive);
                     if ($rows !== []) {
-                        $this->database->replaceStation($samplingPoint, $cityId, $source->name(), $sensor['label']);
                         $entry['samples'] = $this->database->upsertMeasurements(
                             $cityId,
                             array_map(
@@ -219,6 +220,8 @@ final class Ingestor
             $result['samples'] += $entry['samples'];
             $result['sensors'][] = $entry;
         }
+
+        $result['outliers_excluded'] = $this->database->flagOutliers($cityId, $source->name());
 
         return $result;
     }

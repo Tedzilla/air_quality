@@ -62,6 +62,11 @@ final class Database
         $this->addColumnIfMissing('stations', 'source', "TEXT NOT NULL DEFAULT 'eea'");
         $this->addColumnIfMissing('stations', 'label', 'TEXT');
         $this->addColumnIfMissing('measurements', 'source', "TEXT NOT NULL DEFAULT 'eea'");
+        // Set by the outlier filter; excluded samples stay stored but are ignored by coverage and ranking.
+        $this->addColumnIfMissing('measurements', 'excluded', 'INTEGER NOT NULL DEFAULT 0');
+        // 'reference' = regulatory monitor, 'low_cost' = citizen/low-cost sensor.
+        $this->addColumnIfMissing('stations', 'grade', "TEXT NOT NULL DEFAULT 'low_cost'");
+        $this->pdo->exec("UPDATE stations SET grade = 'reference' WHERE source = 'eea' AND grade <> 'reference'");
 
         $insert = $this->pdo->prepare('INSERT OR IGNORE INTO cities (name) VALUES (:name)');
         foreach (Config::CITIES as $city) {
@@ -122,16 +127,98 @@ final class Database
         return $value === false ? null : (string) $value;
     }
 
-    public function replaceStation(string $samplingPoint, int $cityId, string $source = 'eea', ?string $label = null): void
-    {
+    public function replaceStation(
+        string $samplingPoint,
+        int $cityId,
+        string $source = 'eea',
+        ?string $label = null,
+        string $grade = 'reference',
+    ): void {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO stations (sampling_point, city_id, source, label) VALUES (:sp, :city, :source, :label)
+            'INSERT INTO stations (sampling_point, city_id, source, label, grade)
+             VALUES (:sp, :city, :source, :label, :grade)
              ON CONFLICT(sampling_point) DO UPDATE SET
                 city_id = excluded.city_id,
                 source = excluded.source,
-                label = COALESCE(excluded.label, stations.label)'
+                label = COALESCE(excluded.label, stations.label),
+                grade = excluded.grade'
         );
-        $stmt->execute(['sp' => $samplingPoint, 'city' => $cityId, 'source' => $source, 'label' => $label]);
+        $stmt->execute([
+            'sp' => $samplingPoint,
+            'city' => $cityId,
+            'source' => $source,
+            'label' => $label,
+            'grade' => $grade,
+        ]);
+    }
+
+    /**
+     * Marks hourly samples that disagree wildly with the other sensors of the same source in the same
+     * city-hour (a broken or badly placed sensor). Needs Config::OUTLIER_MIN_SENSORS sensors in that hour.
+     * A sample is an outlier when it is more than OUTLIER_RATIO times the median of the other sensors
+     * and also more than OUTLIER_MIN_DIFF µg/m³ above it. Re-evaluated from scratch on every call.
+     *
+     * @return int number of samples excluded
+     */
+    public function flagOutliers(int $cityId, string $source): int
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $reset = $this->pdo->prepare('UPDATE measurements SET excluded = 0 WHERE city_id = :city AND source = :source');
+            $reset->execute(['city' => $cityId, 'source' => $source]);
+
+            $select = $this->pdo->prepare(
+                'SELECT observed_at, sampling_point, pm25 FROM measurements
+                 WHERE city_id = :city AND source = :source ORDER BY observed_at'
+            );
+            $select->execute(['city' => $cityId, 'source' => $source]);
+
+            $mark = $this->pdo->prepare(
+                'UPDATE measurements SET excluded = 1 WHERE sampling_point = :sp AND observed_at = :at'
+            );
+            $excluded = 0;
+            $hour = null;
+            $samples = [];
+            $flush = function () use (&$samples, &$hour, &$excluded, $mark): void {
+                if (count($samples) >= Config::OUTLIER_MIN_SENSORS) {
+                    foreach ($samples as $samplingPoint => $value) {
+                        $others = $samples;
+                        unset($others[$samplingPoint]);
+                        $median = self::median(array_values($others));
+                        if ($value > $median * Config::OUTLIER_RATIO && $value - $median > Config::OUTLIER_MIN_DIFF) {
+                            $mark->execute(['sp' => $samplingPoint, 'at' => $hour]);
+                            $excluded++;
+                        }
+                    }
+                }
+                $samples = [];
+            };
+            foreach ($select as $row) {
+                if ($row['observed_at'] !== $hour) {
+                    $flush();
+                    $hour = $row['observed_at'];
+                }
+                $samples[$row['sampling_point']] = (float) $row['pm25'];
+            }
+            $flush();
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+
+        return $excluded;
+    }
+
+    /** @param list<float> $values */
+    private static function median(array $values): float
+    {
+        sort($values);
+        $n = count($values);
+        $mid = intdiv($n, 2);
+
+        return $n % 2 === 1 ? $values[$mid] : ($values[$mid - 1] + $values[$mid]) / 2;
     }
 
     /** Latest stored hour for one sampling point, or null. */
@@ -153,7 +240,7 @@ final class Database
     public function coveredHours(int $cityId, string $from, string $toExclusive, ?array $sources = null): int
     {
         $sql = 'SELECT COUNT(DISTINCT observed_at) FROM measurements
-                WHERE city_id = ? AND observed_at >= ? AND observed_at < ?';
+                WHERE city_id = ? AND observed_at >= ? AND observed_at < ? AND excluded = 0';
         $params = [$cityId, $from, $toExclusive];
         if ($sources !== null) {
             if ($sources === []) {
@@ -173,7 +260,7 @@ final class Database
     {
         $stmt = $this->pdo->prepare(
             'SELECT DISTINCT observed_at FROM measurements
-             WHERE city_id = :city AND observed_at >= :from AND observed_at < :to
+             WHERE city_id = :city AND observed_at >= :from AND observed_at < :to AND excluded = 0
              ORDER BY observed_at'
         );
         $stmt->execute(['city' => $cityId, 'from' => $from, 'to' => $toExclusive]);
@@ -262,7 +349,7 @@ final class Database
      * counted twice and lower-quality sources only fill gaps.
      *
      * @return list<array{city_id: int, city: string, average_pm25: float, sample_count: int, station_count: int,
-     *     hours_covered: int, hours_by_source: array<string, int>}>
+     *     hours_covered: int, reference_hours: int, hours_by_source: array<string, int>}>
      */
     public function ranking(string $from, string $toExclusive): array
     {
@@ -274,9 +361,10 @@ final class Database
 
         $sql = <<<SQL
             WITH ranked AS (
-                SELECT m.*, {$priority} AS source_rank
+                SELECT m.*, {$priority} AS source_rank, COALESCE(s.grade, 'low_cost') AS grade
                 FROM measurements m
-                WHERE m.observed_at >= :from AND m.observed_at < :to
+                LEFT JOIN stations s ON s.sampling_point = m.sampling_point
+                WHERE m.observed_at >= :from AND m.observed_at < :to AND m.excluded = 0
             ),
             tagged AS (
                 SELECT ranked.*, MIN(source_rank) OVER (PARTITION BY city_id, observed_at) AS best_rank
@@ -292,6 +380,7 @@ final class Database
                 COUNT(*) AS sample_count,
                 COUNT(DISTINCT ch.sampling_point) AS station_count,
                 COUNT(DISTINCT ch.observed_at) AS hours_covered,
+                COUNT(DISTINCT CASE WHEN ch.grade = 'reference' THEN ch.observed_at END) AS reference_hours,
                 (SELECT group_concat(source || '=' || n) FROM (
                     SELECT x.source, COUNT(DISTINCT x.observed_at) AS n
                     FROM chosen x WHERE x.city_id = c.id GROUP BY x.source
@@ -325,6 +414,7 @@ final class Database
                 'sample_count' => (int) $row['sample_count'],
                 'station_count' => (int) $row['station_count'],
                 'hours_covered' => (int) $row['hours_covered'],
+                'reference_hours' => (int) $row['reference_hours'],
                 'hours_by_source' => $bySource,
             ];
         }

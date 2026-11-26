@@ -15,8 +15,9 @@ interface HourlySource
 
     /**
      * Outdoor PM2.5 sensors near a point that have reported on or after $activeSince.
+     * grade is 'reference' for regulatory monitors and 'low_cost' for everything else.
      *
-     * @return list<array{id: string, label: string}>
+     * @return list<array{id: string, label: string, grade: string}>
      */
     public function sensorsNear(float $lat, float $lon, \DateTimeImmutable $activeSince): array;
 

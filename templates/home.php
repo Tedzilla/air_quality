@@ -91,7 +91,8 @@
             border: 1px solid var(--line);
             margin-right: 0.25rem;
         }
-        .table-wrap { overflow-x: auto; }
+        .table-wrap { overflow-x: auto; margin-bottom: 1rem; }
+        h3 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
         @media (max-width: 640px) {
             form { grid-template-columns: 1fr; }
         }
@@ -164,9 +165,9 @@ form.addEventListener('submit', async (event) => {
 
 function render(data) {
     const sourceNames = { eea: 'EEA', openaq: 'OpenAQ', sensor_community: 'sensor.community' };
-    const rows = data.ranking.map((row, index) => `
+    const row = (row, rank) => `
         <tr>
-            <td>${index + 1}</td>
+            <td>${rank}</td>
             <td>${escapeHtml(row.city)}</td>
             <td>${row.average_pm25.toFixed(2)}</td>
             <td class="${row.coverage.complete ? '' : 'warn'}">
@@ -178,26 +179,37 @@ function render(data) {
                 <div class="muted small">${row.station_count} station${row.station_count === 1 ? '' : 's'}${Object.entries(row.coverage.hours_by_source).filter(([s]) => s !== 'eea').map(([s, h]) => `, ${h} h from ${escapeHtml(sourceNames[s] || s)}`).join('')}</div>
             </td>
         </tr>
-    `).join('');
-    const incomplete = data.ranking.filter((row) => !row.coverage.complete).map((row) => row.city);
-    const missing = (data.unavailable || []).map((row) =>
-        `<li><strong>${escapeHtml(row.city)}</strong> — ${escapeHtml(row.reason)}</li>`
-    ).join('');
-    return `
-        <section class="winner">
-            <div class="muted">Cleanest city in this period</div>
-            <h2>${escapeHtml(data.cleanest.city)}</h2>
-            <div class="value">${data.cleanest.average_pm25.toFixed(2)} <span class="muted">${escapeHtml(data.unit)}</span></div>
-        </section>
-        ${incomplete.length ? `<div class="error">Incomplete data (below ${data.coverage_threshold_percent}% of hours) for ${incomplete.map(escapeHtml).join(', ')}. Their averages may not be representative.</div>` : ''}
+    `;
+    const table = (rows, startRank) => `
         <div class="table-wrap">
         <table>
             <thead>
                 <tr><th>#</th><th>City</th><th>Average PM2.5</th><th>Coverage</th><th>Source</th></tr>
             </thead>
-            <tbody>${rows}</tbody>
+            <tbody>${rows.map((r, i) => row(r, startRank === null ? '–' : startRank + i)).join('')}</tbody>
         </table>
         </div>
+    `;
+    const high = data.ranking.filter((r) => r.confidence === 'high');
+    const low = data.ranking.filter((r) => r.confidence === 'low');
+    const incomplete = data.ranking.filter((r) => !r.coverage.complete).map((r) => r.city);
+    const missing = (data.unavailable || []).map((r) =>
+        `<li><strong>${escapeHtml(r.city)}</strong> — ${escapeHtml(r.reason)}</li>`
+    ).join('');
+    return `
+        <section class="winner">
+            <div class="muted">Cleanest city in this period</div>
+            <h2>${escapeHtml(data.cleanest.city)}${data.cleanest.confidence === 'low' ? ' <span class="tag warn">lower confidence</span>' : ''}</h2>
+            <div class="value">${data.cleanest.average_pm25.toFixed(2)} <span class="muted">${escapeHtml(data.unit)}</span></div>
+            <div class="muted small">${escapeHtml(data.cleanest_basis)}</div>
+        </section>
+        ${incomplete.length ? `<div class="error">Incomplete data (below ${data.coverage_threshold_percent}% of hours) for ${incomplete.map(escapeHtml).join(', ')}. Their averages may not be representative.</div>` : ''}
+        ${high.length ? `<h3>Reference monitors</h3>${table(high, 1)}` : ''}
+        ${low.length ? `
+            <h3>Low-cost sensors only <span class="tag warn">lower confidence</span></h3>
+            <p class="muted small">No reference monitor data for these cities, so they are shown separately and not ranked against the cities above.
+            Low-cost sensors (senstate, SDS011) are uncalibrated and often read lower or higher than reference stations, especially in humid weather.</p>
+            ${table(low, high.length ? null : 1)}` : ''}
         ${missing ? `<p class="muted" style="margin-top:1rem">Not ranked</p><ul>${missing}</ul>` : ''}
     `;
 }
