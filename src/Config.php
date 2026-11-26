@@ -30,7 +30,13 @@ final class Config
      * Sources in priority order. For each city-hour only the highest-priority source with data is used,
      * and a source is consulted only when the sources above it cover less than COVERAGE_THRESHOLD.
      */
-    public const SOURCES = ['eea', 'openaq'];
+    public const SOURCES = ['eea', 'openaq', 'sensor_community'];
+
+    public const SENSOR_COMMUNITY_RADIUS_KM = 10;
+    /** Each sensor costs one archive request per day of history, so only the closest ones are used. */
+    public const SENSOR_COMMUNITY_MAX_SENSORS = 10;
+    /** Sensors report every ~2.5 minutes (~24/hour); hours with fewer readings than this are dropped. */
+    public const SENSOR_COMMUNITY_MIN_READINGS_PER_HOUR = 6;
 
     public const OPENAQ_PM25_PARAMETER_ID = 2;
     public const OPENAQ_RADIUS_METERS = 20000;
@@ -44,6 +50,9 @@ final class Config
         public readonly int $refreshHours,
         public readonly ?string $openAqApiKey = null,
         public readonly string $openAqApiBase = 'https://api.openaq.org/v3',
+        public readonly bool $sensorCommunityEnabled = true,
+        public readonly string $sensorCommunityApiBase = 'https://data.sensor.community',
+        public readonly string $sensorCommunityArchiveBase = 'https://archive.sensor.community',
     ) {
         if (!is_dir($this->dataDir) && !mkdir($this->dataDir, 0775, true) && !is_dir($this->dataDir)) {
             throw new \RuntimeException('Cannot create data directory: ' . $this->dataDir);
@@ -59,6 +68,7 @@ final class Config
         $hours = (int) (getenv('REFRESH_HOURS') ?: '6');
         $openAqKey = trim((string) getenv('OPENAQ_API_KEY'));
         $openAqBase = getenv('OPENAQ_API_BASE') ?: 'https://api.openaq.org/v3';
+        $sensorCommunity = strtolower((string) (getenv('SENSOR_COMMUNITY_ENABLED') ?: 'true'));
 
         return new self(
             dataDir: rtrim($dataDir, '/'),
@@ -67,6 +77,7 @@ final class Config
             refreshHours: max(1, $hours),
             openAqApiKey: $openAqKey !== '' ? $openAqKey : null,
             openAqApiBase: rtrim($openAqBase, '/'),
+            sensorCommunityEnabled: !in_array($sensorCommunity, ['0', 'false', 'no', 'off'], true),
         );
     }
 

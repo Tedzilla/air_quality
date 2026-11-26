@@ -9,6 +9,7 @@ use AirQuality\Eea\Client;
 use AirQuality\Ingest\Ingestor;
 use AirQuality\Ingest\ParquetReader;
 use AirQuality\OpenAq\Client as OpenAqClient;
+use AirQuality\SensorCommunity\Client as SensorCommunityClient;
 use AirQuality\Storage\Database;
 
 $config = Config::fromEnvironment();
@@ -17,6 +18,9 @@ $database = new Database($config);
 $fallbacks = [];
 if ($config->openAqApiKey !== null) {
     $fallbacks[] = new OpenAqClient($config);
+}
+if ($config->sensorCommunityEnabled) {
+    $fallbacks[] = new SensorCommunityClient($config);
 }
 
 try {

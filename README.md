@@ -44,27 +44,25 @@ A city is listed as not ranked when EEA currently has no valid PM2.5 for that ci
 
 Downloads repeat every 6 hours inside the container. History older than 6 months is pruned.
 
-### Completeness check and OpenAQ fallback
+### Completeness check and fallback sources
 
-After each EEA download, the app measures **coverage** per city: the share of hours in the 6-month window with at least one valid sample, plus the longest gap.
-If EEA covers less than 75% of the hours for a city, the app looks up PM2.5 sensors within 20 km of the city centre on [OpenAQ](https://openaq.org) and downloads their hourly means (`/v3/sensors/{id}/hours`). Only hours after the last stored one are requested, to stay within the free rate limit (60 requests/minute).
+Sources are ranked: **EEA → OpenAQ → sensor.community**.
 
-- EEA stays the primary source: OpenAQ samples are used only for city-hours with no EEA sample, so a station published by both sources is never counted twice.
-- OpenAQ hours built from less than 50% of the expected readings, or with quality flags, are dropped.
+After each EEA download, the app measures **coverage** per city: the share of hours in the 6-month window with at least one valid sample, plus the longest gap. A fallback source is consulted for a city only when the sources ranked above it cover less than 75% of the hours. It downloads PM2.5 sensors near the city centre and stores their hourly means. Only hours after the last stored one are requested on later runs.
+
+- For each city-hour only the highest-priority source with data is used, so a station published by several sources is never counted twice and lower-quality sources only fill gaps.
+- **OpenAQ** (sensors within 20 km): hourly means via `/v3/sensors/{id}/hours`; hours built from less than 50% of expected readings, or flagged, are dropped. Needs a free API key (https://explore.openaq.org → account settings) in `.env` as `OPENAQ_API_KEY=...`; without it OpenAQ is skipped. Rate-limited to 60 requests/minute.
+- **sensor.community** (up to 10 closest outdoor sensors within 10 km): no key needed. Sensors are found via the live API and history is read from the daily per-sensor CSV archive (UTC, readings every ~2.5 min), averaged per hour; hours with fewer than 6 readings are dropped. Data is under the [ODbL](https://opendatacommons.org/licenses/odbl/). Disable with `SENSOR_COMMUNITY_ENABLED=false`.
 - `/api/ranking` reports `coverage` (hours covered/expected, percent, hours per source) and `sources` for each city. The UI warns when a city is below 75%.
 
-OpenAQ needs a free API key (https://explore.openaq.org → account settings). Put it in `.env` (git- and docker-ignored):
+As of late 2026, Plovdiv is filled from an OpenAQ senstate sensor and Burgas from sensor.community. Both are low-cost sensors, which are less accurate than the EEA reference stations.
 
-```
-OPENAQ_API_KEY=your-key
-```
-
-Without a key the app runs on EEA data only. As of late 2026, OpenAQ fills Plovdiv from a senstate low-cost sensor; Burgas has no PM2.5 in either source (only PM10 and gases).
+The first download runs in the background, so the web server starts right away. The sensor.community history takes a minute or two.
 
 ## Layout
 
 ```
-bin/ingest.php      download EEA parquet (+ OpenAQ fallback) → SQLite
+bin/ingest.php      download EEA parquet (+ OpenAQ / sensor.community fallbacks) → SQLite
 bin/scheduler.php   refresh on an interval
 public/index.php    web UI + JSON API
 src/                PHP application code

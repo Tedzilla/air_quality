@@ -65,7 +65,7 @@ final class RankingService
             if (!in_array($city, $rankedNames, true)) {
                 $unavailable[] = [
                     'city' => $city,
-                    'reason' => 'Neither EEA nor OpenAQ has valid hourly PM2.5 measurements for this city in the selected period.',
+                    'reason' => 'None of the data sources (EEA, OpenAQ, sensor.community) has valid hourly PM2.5 measurements for this city in the selected period.',
                 ];
             }
         }

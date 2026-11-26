@@ -14,6 +14,7 @@ $database = new Database($config);
 $app = new Application(new RankingService($database, array_values(array_filter([
     'eea',
     $config->openAqApiKey !== null ? 'openaq' : null,
+    $config->sensorCommunityEnabled ? 'sensor_community' : null,
 ]))));
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';

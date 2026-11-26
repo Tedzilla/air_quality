@@ -103,7 +103,7 @@
     <p class="lede">
         Average PM2.5 (µg/m³) for Sofia, Plovdiv, Varna, Burgas and Ruse.
         Data is downloaded from the European Environment Agency and stored locally.
-        Where EEA data is incomplete, missing hours are filled from OpenAQ.
+        Where EEA data is incomplete, missing hours are filled from OpenAQ, then from sensor.community.
     </p>
 
     <form id="query-form">
@@ -163,7 +163,7 @@ form.addEventListener('submit', async (event) => {
 });
 
 function render(data) {
-    const sourceNames = { eea: 'EEA', openaq: 'OpenAQ' };
+    const sourceNames = { eea: 'EEA', openaq: 'OpenAQ', sensor_community: 'sensor.community' };
     const rows = data.ranking.map((row, index) => `
         <tr>
             <td>${index + 1}</td>
