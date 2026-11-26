@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "8000:8080"
+    volumes:
+      - air_quality_data:/var/lib/air_quality
+    environment:
+      DATA_DIR: /var/lib/air_quality
+      REFRESH_HOURS: "6"
+
+volumes:
+  air_quality_data:

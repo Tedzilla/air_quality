@@ -1,0 +1,8 @@
+.git
+data
+tmp
+README.md
+LICENSE
+*.sqlite
+*.sqlite-journal
+.env
